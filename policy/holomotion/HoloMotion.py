@@ -7,6 +7,7 @@ import h5py
 import numpy as np
 import onnxruntime
 import yaml
+
 from common.ctrlcomp import PolicyOutput, StateAndCmd
 from common.utils import FSMCommand
 
@@ -383,8 +384,10 @@ class HoloMotion(FSMState):
                     "ref_dof_pos and ref_dof_vel must be provided for motion_tracking mode"
                 )
             # Map reference motion to ONNX order
-            ref_dof_pos_onnx = ref_dof_pos[self.ref_to_onnx].astype(np.float32)
-            ref_dof_vel_onnx = ref_dof_vel[self.ref_to_onnx].astype(np.float32)
+            # Note: HDF5 DOF order matches MuJoCo order, so use joint2motor_idx
+            # (which maps from MuJoCo to ONNX order) to map HDF5 data
+            ref_dof_pos_onnx = ref_dof_pos[self.joint2motor_idx].astype(np.float32)
+            ref_dof_vel_onnx = ref_dof_vel[self.joint2motor_idx].astype(np.float32)
             ref_motion_states = np.concatenate(
                 [ref_dof_pos_onnx, ref_dof_vel_onnx], axis=0
             ).astype(np.float32)
@@ -487,6 +490,8 @@ class HoloMotion(FSMState):
         self._apply_action_to_output()
 
         self.last_action = self.action.copy()
+        if self.command_mode == "motion_tracking":
+            self.motion_frame_idx = (self.motion_frame_idx + 1) % self.n_motion_frames
 
     def _build_motion_tracking_obs(self, q, dq, gravity_ori, ang_vel):
         """Build observation for motion tracking mode."""
@@ -502,7 +507,6 @@ class HoloMotion(FSMState):
             ref_dof_pos=ref_dof_pos_raw,
             ref_dof_vel=ref_dof_vel_raw,
         )
-        self.motion_frame_idx = (self.motion_frame_idx + 1) % self.n_motion_frames
         return hist_obs
 
     def _build_velocity_tracking_obs(self, q, dq, gravity_ori, ang_vel):
